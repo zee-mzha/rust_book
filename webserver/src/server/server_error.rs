@@ -11,6 +11,13 @@ pub enum ServerError{
 
 impl fmt::Display for ServerError{
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result{
+		let err_str = match self{
+			"Invalid argument format",
+			"Invalid arguments",
+			"Failed to parse port",
+			"Port outside of valid range"
+		};
+		write!(f, err_str);
 		match self{
 			ServerError::InvalidFmt => write!(f, "Invalid argument format"),
 			ServerError::InvalidArgs => write!(f, "Invalid arguments"),
