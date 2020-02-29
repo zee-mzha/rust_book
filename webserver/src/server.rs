@@ -1,10 +1,12 @@
+mod server_error;
+
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::error::Error;
 use std::env;
 use std::fs;
 use std::collections::HashMap;
-use super::server_error::ServerError;
+use server_error::ServerError;
 
 pub struct Server{
 	listener: TcpListener,
