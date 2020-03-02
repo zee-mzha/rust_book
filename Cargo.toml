@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+	"company_manager",
+	"minigrep",
+	"webserver"
+]
