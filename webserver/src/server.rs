@@ -28,13 +28,24 @@ impl Server{
 		let program_name = args.next().unwrap();
 		for arg in args{
 			let arg: Vec<_> = (&arg[2..]).splitn(2, '=').collect();
-			//if length is 1 then there was no =
+			
+			let (opt, val): (&str, &str);
 			if arg.len() == 1{
-				return Err(ServerError::InvalidFmt);
-			};
-			let (arg, val) = (arg[0], arg[1]);
+				if arg[0] == "help"{
+					opt = arg[0];
+					//get the rust compiler to shut up about val being possibly unintialized
+					val = "";
+				}
+				else{
+					return Err(ServerError::InvalidArgs);
+				}
+			}
+			else{
+				opt = arg[0];
+				val = arg[1];
+			}
 
-			match arg{
+			match opt{
 				"root" => root = String::from(val),
 				"port" => {
 					//check if the port value passed is valid
@@ -56,7 +67,7 @@ impl Server{
 					for alias in alias_list{
 						aliases.insert(String::from(alias), name.clone());
 					}
-				}
+				},
 				"thread" => {
 					let tmp = match val.parse(){
 						Ok(v) => v,
@@ -67,23 +78,23 @@ impl Server{
 						return Err(ServerError::ZeroThreadCount);
 					}
 					thread_count = tmp;
-				}
+				},
 				"help" => {
 					println!(
-						"usage: {} <flags>.\n
-						flags:\n
-						\t--root=<path>\n
-						\t\tspecify the root path of the website, the default is the current working directory\n\n
-						\t--port=<0-65535>\n
-						\t\tspecify what port to listen to connections on, default is 7878\n\n
-						\t--alias=<comma separated list>\n
-						\t\tspecifies and alias to the first item in the list\n
-						\t\te.g. `--alias=index.html,index` the path /index will now refer to index.html\n\n
-						\t--thread=<count>\n
+						"usage: {} <flags>.\n\
+						flags:\n\
+						\t--root=<path>\n\
+						\t\tspecify the root path of the website, the default is the current working directory\n\n\
+						\t--port=<0-65535>\n\
+						\t\tspecify what port to listen to connections on, default is 7878\n\n\
+						\t--alias=<comma separated list>\n\
+						\t\tspecifies and alias to the first item in the list\n\
+						\t\te.g. `--alias=index.html,index` the path /index will now refer to index.html\n\n\
+						\t--thread=<count>\n\
 						\t\tspecify how many threads to create to handle incoming connections. default is 10\n\n",
 						program_name);
 						return Err(ServerError::HelpRequest);
-				}
+				},
 				_ => return Err(ServerError::InvalidArgs)
 			}
 		}
