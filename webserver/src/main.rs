@@ -5,7 +5,7 @@ use server::Server;
 use server::ServerError;
 
 fn main(){
-	let mut server = match Server::new(env::args()){
+	let server = match Server::new(env::args()){
 		Ok(s) => s,
 		Err(e) => {
 			match e{

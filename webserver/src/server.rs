@@ -111,7 +111,7 @@ impl Server{
 		})
 	}
 
-	pub fn run(&mut self) -> Result<(), std::io::Error>{
+	pub fn run(&self) -> Result<(), std::io::Error>{
 		let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port))?;
 
 		let (tx, rx) = channel::unbounded();
