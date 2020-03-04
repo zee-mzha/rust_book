@@ -1,17 +1,18 @@
 mod server;
 
-use std::{
-	env,
-	process
-};
+use std::env;
 use server::Server;
+use server::ServerError;
 
 fn main(){
 	let mut server = match Server::new(env::args()){
 		Ok(s) => s,
 		Err(e) => {
-			println!("Failed to start server: {}", e);
-			process::exit(1);
+			match e{
+				ServerError::HelpRequest => {},
+				_ => println!("Error configuring server: {}", e)
+			}
+			return;
 		}
 	};
 	server.run().unwrap();

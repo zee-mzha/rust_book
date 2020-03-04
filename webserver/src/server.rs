@@ -3,31 +3,34 @@ mod server_error;
 use std::{
 	io::{Read, Write},
 	net::{TcpListener, TcpStream},
-	error::Error,
 	env,
 	fs,
 	collections::HashMap,
+	thread
 };
-use server_error::ServerError;
+use crossbeam::{self, channel};
+pub use server_error::ServerError;
 
 pub struct Server{
 	aliases: HashMap<String, String>,
 	root: String,
-	port: String
+	port: String,
+	thread_count: usize
 }
 
 impl Server{
-	pub fn new(mut args: env::Args) -> Result<Server, Box<dyn Error>>{
+	pub fn new(mut args: env::Args) -> Result<Server, ServerError>{
 		let mut root = String::new();
 		let mut port = String::from("7878");
 		let mut aliases = HashMap::new();
+		let mut thread_count: usize = 10;
 
 		let program_name = args.next().unwrap();
 		for arg in args{
 			let arg: Vec<_> = (&arg[2..]).splitn(2, '=').collect();
 			//if length is 1 then there was no =
 			if arg.len() == 1{
-				return Err(Box::new(ServerError::InvalidFmt));
+				return Err(ServerError::InvalidFmt);
 			};
 			let (arg, val) = (arg[0], arg[1]);
 
@@ -37,14 +40,14 @@ impl Server{
 					//check if the port value passed is valid
 					let tmp: i32 = match val.parse(){
 						Ok(v) => v,
-						Err(_) => return Err(Box::new(ServerError::PortParse))
+						Err(_) => return Err(ServerError::PortParse)
 					};
 
 					if tmp >= u16::min_value() as i32 && tmp <= u16::max_value() as i32{
 						port = String::from(val);
 					}
 					else{
-						return Err(Box::new(ServerError::PortRange))
+						return Err(ServerError::PortRange)
 					}
 				},
 				"alias" => {
@@ -53,6 +56,17 @@ impl Server{
 					for alias in alias_list{
 						aliases.insert(String::from(alias), name.clone());
 					}
+				}
+				"thread" => {
+					let tmp = match val.parse(){
+						Ok(v) => v,
+						Err(_) => return Err(ServerError::ThreadCountParse)
+					};
+
+					if tmp == 0{
+						return Err(ServerError::ZeroThreadCount);
+					}
+					thread_count = tmp;
 				}
 				"help" => {
 					println!(
@@ -64,10 +78,13 @@ impl Server{
 						\t\tspecify what port to listen to connections on, default is 7878\n\n
 						\t--alias=<comma separated list>\n
 						\t\tspecifies and alias to the first item in the list\n
-						\t\te.g. `--alias=index.html,index` the path /index will now refer to index.html\n\n",
+						\t\te.g. `--alias=index.html,index` the path /index will now refer to index.html\n\n
+						\t--thread=<count>\n
+						\t\tspecify how many threads to create to handle incoming connections. default is 10\n\n",
 						program_name);
+						return Err(ServerError::HelpRequest);
 				}
-				_ => return Err(Box::new(ServerError::InvalidArgs))
+				_ => return Err(ServerError::InvalidArgs)
 			}
 		}
 
@@ -78,24 +95,41 @@ impl Server{
 		Ok(Server{
 			aliases,
 			root,
-			port
+			port,
+			thread_count
 		})
 	}
 
 	pub fn run(&mut self) -> Result<(), std::io::Error>{
 		let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port))?;
 
-		for stream in listener.incoming(){
-			let stream = match stream{
-				Ok(s) => s,
-				Err(e) => {
-					println!("Error accepting connection: {}", e);
-					continue;
+		let (tx, rx) = channel::unbounded();
+		thread::spawn(move ||{
+			for stream in listener.incoming(){
+				let stream = match stream{
+					Ok(s) => s,
+					Err(e) => {
+						println!("Error accepting connection: {}", e);
+						continue;
+					}
+				};
+
+				if let Err(_) = tx.send(stream){
+					break;
 				}
 			};
+		});
 
-			self.handle_connection(stream);
-		};
+		crossbeam::thread::scope(|s|{
+			for _ in 0..self.thread_count{
+				s.spawn(|_|{
+					let rx = rx.clone();
+					for stream in rx{
+						self.handle_connection(stream);
+					}
+				});
+			}
+		}).unwrap();
 
 		Ok(())
 	}
