@@ -157,10 +157,10 @@ impl Server{
 		let request = match Server::uri_from_request(&request){
 			Some(s) => {
 				if s == "/"{
-					String::from(s)+"index.html"
+					"/index.html"
 				}
 				else{
-					String::from(s)
+					s
 				}
 			},
 			None => return
