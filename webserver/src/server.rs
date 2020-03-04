@@ -1,19 +1,19 @@
 mod server_error;
 
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::error::Error;
-use std::env;
-use std::fs;
-use std::collections::HashMap;
+use std::{
+	io::{Read, Write},
+	net::{TcpListener, TcpStream},
+	error::Error,
+	env,
+	fs,
+	collections::HashMap,
+};
 use server_error::ServerError;
 
 pub struct Server{
-	listener: TcpListener,
 	aliases: HashMap<String, String>,
 	root: String,
-
-	pub addr: SocketAddr
+	port: String
 }
 
 impl Server{
@@ -71,22 +71,21 @@ impl Server{
 			}
 		}
 
-		let listener = TcpListener::bind(format!("127.0.0.1:{}", port))?;
-		let addr = listener.local_addr()?;
 		if root.is_empty(){
 			root.push_str("/var/www/html/");
 		};
 
 		Ok(Server{
-			listener,
 			aliases,
 			root,
-			addr
+			port
 		})
 	}
 
-	pub fn run(&mut self){
-		for stream in self.listener.incoming(){
+	pub fn run(&mut self) -> Result<(), std::io::Error>{
+		let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port))?;
+
+		for stream in listener.incoming(){
 			let stream = match stream{
 				Ok(s) => s,
 				Err(e) => {
@@ -97,6 +96,8 @@ impl Server{
 
 			self.handle_connection(stream);
 		};
+
+		Ok(())
 	}
 
 	fn handle_connection(&self, mut stream: TcpStream){

@@ -1,7 +1,10 @@
 mod server;
+
+use std::{
+	env,
+	process
+};
 use server::Server;
-use std::env;
-use std::process;
 
 fn main(){
 	let mut server = match Server::new(env::args()){
@@ -11,5 +14,5 @@ fn main(){
 			process::exit(1);
 		}
 	};
-	server.run();
+	server.run().unwrap();
 }

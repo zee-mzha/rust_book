@@ -1,5 +1,7 @@
-use std::fmt;
-use std::error;
+use std::{
+	fmt,
+	error
+};
 
 #[derive(Debug)]
 pub enum ServerError{
