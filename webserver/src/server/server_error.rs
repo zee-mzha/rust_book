@@ -14,7 +14,7 @@ pub enum ServerError{
 }
 
 impl fmt::Display for ServerError{
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result{
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result{
 		let err_str = match self{
 			ServerError::InvalidArgs => "Invalid arguments",
 			ServerError::PortParse => "Failed to parse port",
