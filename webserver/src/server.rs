@@ -1,21 +1,23 @@
 mod server_error;
 
 use std::{
-	io::{Read, Write},
-	net::{TcpListener, TcpStream},
 	env,
 	fs,
 	collections::HashMap,
-	thread
+	sync::Arc
 };
-use crossbeam::{self, channel};
+use tokio::{
+	prelude::*,
+	net::{TcpListener, TcpStream},
+	sync::mpsc
+};
+use async_std::io;
 pub use server_error::ServerError;
 
 pub struct Server{
+	port: String,
 	aliases: HashMap<String, String>,
 	root: String,
-	port: String,
-	thread_count: usize
 }
 
 impl Server{
@@ -23,7 +25,6 @@ impl Server{
 		let mut root = String::new();
 		let mut port = String::from("7878");
 		let mut aliases = HashMap::new();
-		let mut thread_count: usize = 10;
 
 		let program_name = args.next().unwrap();
 		for arg in args{
@@ -68,17 +69,6 @@ impl Server{
 						aliases.insert(String::from(alias), name.clone());
 					}
 				},
-				"thread" => {
-					let tmp = match val.parse(){
-						Ok(v) => v,
-						Err(_) => return Err(ServerError::ThreadCountParse)
-					};
-
-					if tmp == 0{
-						return Err(ServerError::ZeroThreadCount);
-					}
-					thread_count = tmp;
-				},
 				"help" => {
 					println!(
 						"usage: {} <flags>.\n\
@@ -89,9 +79,7 @@ impl Server{
 						\t\tspecify what port to listen to connections on, default is 7878\n\n\
 						\t--alias=<comma separated list>\n\
 						\t\tspecifies and alias to the first item in the list\n\
-						\t\te.g. `--alias=index.html,index` the path /index will now refer to index.html\n\n\
-						\t--thread=<count>\n\
-						\t\tspecify how many threads to create to handle incoming connections. default is 10\n\n",
+						\t\te.g. `--alias=index.html,index` the path /index will now refer to index.html\n\n",
 						program_name);
 						return Err(ServerError::HelpRequest);
 				},
@@ -106,54 +94,68 @@ impl Server{
 		Ok(Server{
 			aliases,
 			root,
-			port,
-			thread_count
+			port
 		})
 	}
 
-	pub fn run(&self) -> Result<(), std::io::Error>{
-		let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port))?;
+	pub async fn run(arc_self: Arc<Self>) -> Result<(), std::io::Error>{
+		let mut listener = TcpListener::bind(format!("127.0.0.1:{}", arc_self.port)).await?;
+		let (mut tx, mut rx) = mpsc::channel::<()>(1);
 
-		let (tx, rx) = channel::unbounded();
-		thread::spawn(move ||{
-			for stream in listener.incoming(){
-				let stream = match stream{
-					Ok(s) => s,
-					Err(e) => {
-						println!("Error accepting connection: {}", e);
-						continue;
+		let listen = async move{
+
+			loop{
+				tokio::select! {
+					_ = rx.recv() => {
+						break;
+					}
+					stream = listener.accept() => {
+						let stream = match stream{
+							Ok((s, _)) => s,
+							Err(e) => {
+								println!("Error accepting connection: {}", e);
+								continue;
+							}
+						};
+
+						tokio::spawn(Server::handle_connection(arc_self.clone(), stream));
 					}
 				};
+			};
+		};
 
-				if let Err(_) = tx.send(stream){
+		let cli = async move{
+			let mut input = String::new();
+			loop{
+				if let Err(_) = io::stdin().read_line(&mut input).await{
+					eprintln!("Failed to read input, terminating server");
+					tx.send(()).await.unwrap();
 					break;
 				}
-			};
-		});
+				input = input.trim().to_lowercase();
 
-		crossbeam::thread::scope(|s|{
-			for _ in 0..self.thread_count{
-				s.spawn(|_|{
-					let rx = rx.clone();
-					for stream in rx{
-						self.handle_connection(stream);
-					}
-				});
+				if input == "quit"{
+					//receiver will never drop before transmitter
+					tx.send(()).await.unwrap();
+					break;
+				}
 			}
-		}).unwrap();
+
+			Ok::<(), io::Error>(())
+		};
+		let (_, _) = tokio::join!(listen, cli);
 
 		Ok(())
 	}
 
-	fn handle_connection(&self, mut stream: TcpStream){
+	async fn handle_connection(arc_self: Arc<Self>, mut stream: TcpStream){
 		let mut buffer = [0; 1024];
-		if let Err(e) = stream.read(&mut buffer){
-			println!("Error reading request: {}", e);
+		if let Err(e) = stream.read(&mut buffer).await{
+			eprintln!("Error reading request: {}", e);
 			return;
 		};
 
 		let request = String::from_utf8_lossy(&buffer); 
-		println!("Request: {}", request);
 		let request = match Server::uri_from_request(&request){
 			Some(s) => {
 				if s == "/"{
@@ -166,10 +168,10 @@ impl Server{
 			None => return
 		};
 
-		self.send_file(&stream, &request);
+		Server::send_file(arc_self, &mut stream, request).await;
 	}
 
-	fn send_file(&self, stream: &TcpStream, request: &str){
+	async fn send_file(arc_self: Arc<Self>, stream: &mut TcpStream, request: &str){
 		static ERR404: ErrorCode = ErrorCode{
 			response: Response{
 				code: "404",
@@ -181,19 +183,19 @@ impl Server{
 
 		//store message content here so that references can live long enough
 		let mut message = String::new();
-		let response = if let Ok(s) = fs::read_to_string(self.root.clone()+request){
+		let response = if let Ok(s) = fs::read_to_string(arc_self.root.clone()+request){
 			message = s;
 			Response::new("200", "OK", &message)
 		}
 		else{
 			//all of our requests begin with / which messes up the search
-			if let Some(s) = self.aliases.get(&request[1..]){
-				match fs::read_to_string(self.root.clone()+s){
+			if let Some(s) = arc_self.aliases.get(&request[1..]){
+				match fs::read_to_string(arc_self.root.clone()+s){
 					Ok(c) => {
 						message = c;
 					},
 					Err(e) => {
-						println!("Failed to read {}: {}", request, e);
+						eprintln!("Failed to read {}: {}", request, e);
 					}
 				};
 			};
@@ -202,7 +204,7 @@ impl Server{
 				Response::new("200", "OK", &message)
 			}
 			else{
-				if let Ok(c) = fs::read_to_string(self.root.clone()){
+				if let Ok(c) = fs::read_to_string(&arc_self.root){
 					message = c;
 					Response::new(ERR404.response.code, ERR404.response.phrase, &message)
 				}
@@ -212,19 +214,19 @@ impl Server{
 			}
 		};
 
-		Server::respond(stream, &response);
+		Server::respond(stream, &response).await;
 	}
 
-	fn respond(mut stream: &TcpStream, Response{code, phrase, message}: &Response){
+	async fn respond<'a>(stream: &mut TcpStream, Response{code, phrase, message}: &Response<'a>){
 		let response = format!("HTTP/1.1 {} {}\r\n\r\n{}", code, phrase, message);
 
-		if let Err(e) = stream.write(response.as_bytes()){
-			println!("Error sending response: {}", e);
+		if let Err(e) = stream.write(response.as_bytes()).await{
+			eprintln!("Error sending response: {}", e);
 			return;
 		};
 
-		if let Err(e) = stream.flush(){
-			println!("Error sending resposne: {}", e);
+		if let Err(e) = stream.flush().await{
+			eprintln!("Error sending resposne: {}", e);
 			return
 		};
 	}

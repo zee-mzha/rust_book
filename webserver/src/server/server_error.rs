@@ -8,8 +8,6 @@ pub enum ServerError{
 	InvalidArgs,
 	PortParse,
 	PortRange,
-	ThreadCountParse,
-	ZeroThreadCount,
 	HelpRequest
 }
 
@@ -19,8 +17,6 @@ impl fmt::Display for ServerError{
 			ServerError::InvalidArgs => "Invalid arguments",
 			ServerError::PortParse => "Failed to parse port",
 			ServerError::PortRange => "Port outside of valid range",
-			ServerError::ThreadCountParse => "Failed to parse thread count",
-			ServerError::ZeroThreadCount => "A thread count of zero is not allowed",
 			ServerError::HelpRequest => "Help flag passed this is not an error, this case should be handled explicitly"
 		};
 		write!(f, "{}", err_str)

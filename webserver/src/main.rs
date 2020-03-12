@@ -1,19 +1,25 @@
 mod server;
 
-use std::env;
+use std::{
+	env,
+	sync::Arc
+};
 use server::Server;
 use server::ServerError;
 
-fn main(){
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>>{
 	let server = match Server::new(env::args()){
-		Ok(s) => s,
+		Ok(s) => Arc::new(s),
 		Err(e) => {
 			match e{
 				ServerError::HelpRequest => {},
 				_ => println!("Error configuring server: {}", e)
 			}
-			return;
+			return Ok(());
 		}
 	};
-	server.run().unwrap();
+	Server::run(server).await;
+
+	Ok(())
 }
