@@ -9,7 +9,8 @@ use std::{
 use tokio::{
 	prelude::*,
 	net::{TcpListener, TcpStream},
-	sync::mpsc
+	sync::mpsc,
+	runtime::Runtime
 };
 use async_std::io;
 pub use server_error::ServerError;
@@ -21,7 +22,7 @@ pub struct Server{
 }
 
 impl Server{
-	pub fn new(mut args: env::Args) -> Result<Server, ServerError>{
+	pub fn new(mut args: env::Args) -> Result<Self, ServerError>{
 		let mut root = String::new();
 		let mut port = String::from("7878");
 		let mut aliases = HashMap::new();
@@ -98,54 +99,56 @@ impl Server{
 		})
 	}
 
-	pub async fn run(arc_self: Arc<Self>) -> Result<(), std::io::Error>{
-		let mut listener = TcpListener::bind(format!("127.0.0.1:{}", arc_self.port)).await?;
-		let (mut tx, mut rx) = mpsc::channel::<()>(1);
+	pub fn run(arc_self: Arc<Self>) -> Result<(), std::io::Error>{
+		let mut runtime = Runtime::new()?;
+		runtime.block_on(async{
+			let mut listener = TcpListener::bind(format!("127.0.0.1:{}", arc_self.port)).await?;
+			let (mut tx, mut rx) = mpsc::channel::<()>(1);
 
-		let listen = async move{
+			let listen = async move{
+				loop{
+					tokio::select! {
+						_ = rx.recv() => {
+							break;
+						}
+						stream = listener.accept() => {
+							let stream = match stream{
+								Ok((s, _)) => s,
+								Err(e) => {
+									println!("Error accepting connection: {}", e);
+									continue;
+								}
+							};
 
-			loop{
-				tokio::select! {
-					_ = rx.recv() => {
-						break;
-					}
-					stream = listener.accept() => {
-						let stream = match stream{
-							Ok((s, _)) => s,
-							Err(e) => {
-								println!("Error accepting connection: {}", e);
-								continue;
-							}
-						};
-
-						tokio::spawn(Server::handle_connection(arc_self.clone(), stream));
-					}
+							tokio::spawn(Server::handle_connection(arc_self.clone(), stream));
+						}
+					};
 				};
 			};
-		};
 
-		let cli = async move{
-			let mut input = String::new();
-			loop{
-				if let Err(_) = io::stdin().read_line(&mut input).await{
-					eprintln!("Failed to read input, terminating server");
-					tx.send(()).await.unwrap();
-					break;
+			let cli = async move{
+				let mut input = String::new();
+				loop{
+					if let Err(_) = io::stdin().read_line(&mut input).await{
+						eprintln!("Failed to read input, terminating server");
+						tx.send(()).await.unwrap();
+						break;
+					}
+					input = input.trim().to_lowercase();
+
+					if input == "quit"{
+						//receiver will never drop before transmitter
+						tx.send(()).await.unwrap();
+						break;
+					}
 				}
-				input = input.trim().to_lowercase();
 
-				if input == "quit"{
-					//receiver will never drop before transmitter
-					tx.send(()).await.unwrap();
-					break;
-				}
-			}
+				Ok::<(), io::Error>(())
+			};
 
-			Ok::<(), io::Error>(())
-		};
-		let (_, _) = tokio::join!(listen, cli);
-
-		Ok(())
+			let _ = tokio::join!(listen, cli);
+			Ok::<(), std::io::Error>(())
+		})
 	}
 
 	async fn handle_connection(arc_self: Arc<Self>, mut stream: TcpStream){
@@ -168,10 +171,10 @@ impl Server{
 			None => return
 		};
 
-		Server::send_file(arc_self, &mut stream, request).await;
+		Server::send_file(&*arc_self, &mut stream, request).await;
 	}
 
-	async fn send_file(arc_self: Arc<Self>, stream: &mut TcpStream, request: &str){
+	async fn send_file(&self, stream: &mut TcpStream, request: &str){
 		static ERR404: ErrorCode = ErrorCode{
 			response: Response{
 				code: "404",
@@ -183,14 +186,14 @@ impl Server{
 
 		//store message content here so that references can live long enough
 		let mut message = String::new();
-		let response = if let Ok(s) = fs::read_to_string(arc_self.root.clone()+request){
+		let response = if let Ok(s) = fs::read_to_string(self.root.clone()+request){
 			message = s;
 			Response::new("200", "OK", &message)
 		}
 		else{
 			//all of our requests begin with / which messes up the search
-			if let Some(s) = arc_self.aliases.get(&request[1..]){
-				match fs::read_to_string(arc_self.root.clone()+s){
+			if let Some(s) = self.aliases.get(&request[1..]){
+				match fs::read_to_string(self.root.clone()+s){
 					Ok(c) => {
 						message = c;
 					},
@@ -204,7 +207,7 @@ impl Server{
 				Response::new("200", "OK", &message)
 			}
 			else{
-				if let Ok(c) = fs::read_to_string(&arc_self.root){
+				if let Ok(c) = fs::read_to_string(&self.root){
 					message = c;
 					Response::new(ERR404.response.code, ERR404.response.phrase, &message)
 				}
