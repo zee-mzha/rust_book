@@ -115,7 +115,7 @@ impl Server{
 							let stream = match stream{
 								Ok((s, _)) => s,
 								Err(e) => {
-									println!("Error accepting connection: {}", e);
+									eprintln!("Error accepting connection: {}", e);
 									continue;
 								}
 							};
