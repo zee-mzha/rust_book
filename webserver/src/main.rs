@@ -14,12 +14,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 		Err(e) => {
 			match e{
 				ServerError::HelpRequest => {},
-				_ => println!("Error configuring server: {}", e)
-			}
+				_ => eprintln!("Error occured when configuring server: {}", e)
+			};
 			return Ok(());
 		}
 	};
-	Server::run(server).await;
+	if let Err(e) = Server::run(server).await{
+		eprintln!("Error occured when running server: {}", e);
+	}
 
 	Ok(())
 }
