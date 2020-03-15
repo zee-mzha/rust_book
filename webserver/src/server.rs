@@ -23,7 +23,7 @@ pub struct Server{
 
 impl Server{
 	pub fn new(mut args: env::Args) -> Result<Self, ServerError>{
-		let mut root = String::new();
+		let mut root = String::from("/var/www/html/");
 		let mut port = String::from("7878");
 		let mut aliases = HashMap::new();
 
@@ -75,7 +75,7 @@ impl Server{
 						"usage: {} <flags>.\n\
 						flags:\n\
 						\t--root=<path>\n\
-						\t\tspecify the root path of the website, the default is the current working directory\n\n\
+						\t\tspecify the root path of the website, the default is /var/www/html/\n\n\
 						\t--port=<0-65535>\n\
 						\t\tspecify what port to listen to connections on, default is 7878\n\n\
 						\t--alias=<comma separated list>\n\
@@ -87,10 +87,6 @@ impl Server{
 				_ => return Err(ServerError::InvalidArgs)
 			}
 		}
-
-		if root.is_empty(){
-			root.push_str("/var/www/html/");
-		};
 
 		Ok(Server{
 			aliases,
